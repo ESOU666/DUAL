@@ -286,64 +286,70 @@ for p in tf.trainable_variables():
     logger.debug("%s: %s" % (p.name, sess.run(tf.shape(p))))  # 打印模型变量的名称和形状
 
 # start training
-step = 0
-loss_list, acc_list, aux_loss_list = [], [], []
-test_auc_list, test_loss_list, test_acc_list, test_aux_loss_list = [], [], [], []
-for epoch in range(n_epochs):
-    for src, tgt in train_data:
+step = 0  # 初始化步数
+loss_list, acc_list, aux_loss_list = [], [], []  # 用于存储训练过程中的损失、准确率和辅助损失
+test_auc_list, test_loss_list, test_acc_list, test_aux_loss_list = [], [], [], []  # 用于存储测试过程中的AUC、损失、准确率和辅助损失
+
+for epoch in range(n_epochs):  # 迭代训练多个epoch
+    for src, tgt in train_data:  # 遍历训练数据
         uids, mids, cats, mid_his, cat_his, mid_mask, target, sl, noclk_mids, noclk_cats = prepare_data(
             src, tgt, maxlen, return_neg=True
-        )
+        )  # 将训练数据转换为模型所需的输入格式
+
         loss, acc, aux_loss, smr = model.train(
             sess, [uids, mids, cats, mid_his, cat_his, mid_mask, target, sl, lr, noclk_mids, noclk_cats, temp]
-        )
+        )  # 执行一次训练步骤，并返回损失、准确率、辅助损失和汇总信息
 
-        step += 1
-        loss_list.append(loss)
-        acc_list.append(acc)
-        aux_loss_list.append(aux_loss)
+        step += 1  # 更新步数
+        loss_list.append(loss)  # 将损失添加到列表中
+        acc_list.append(acc)  # 将准确率添加到列表中
+        aux_loss_list.append(aux_loss)  # 将辅助损失添加到列表中
 
         # print training metrics
-        if step % args.log_every == 0:
+        if step % args.log_every == 0:  # 如果步数能被args.log_every整除，则打印训练指标
             logger.info(
                 "step: {:11d}: train_loss = {:.5f}, train_accuracy = {:.5f}, train_aux_loss = {:.5f}".format(
                     step,
-                    np.mean(loss_list[-args.log_every :]),
-                    np.mean(acc_list[-args.log_every :]),
-                    np.mean(aux_loss_list[-args.log_every :]),
+                    np.mean(loss_list[-args.log_every:]),  # 最近args.log_every个步骤的平均损失
+                    np.mean(acc_list[-args.log_every:]),  # 最近args.log_every个步骤的平均准确率
+                    np.mean(aux_loss_list[-args.log_every:]),  # 最近args.log_every个步骤的平均辅助损失
                 )
             )
-            writer.add_summary(smr, step)
+            writer.add_summary(smr, step)  # 将汇总信息写入TensorBoard的日志文件
             writer.flush()
 
         # test and visualization
-        if step % args.viz_every == 0:
-            test_auc, test_loss, test_accuracy, test_aux_loss = evaluate(sess, test_data, model)
+        if step % args.viz_every == 0:  # 如果步数能被args.viz_every整除，则进行测试和可视化操作
+            test_auc, test_loss, test_accuracy, test_aux_loss = evaluate(sess, test_data, model)  # 在测试数据集上评估模型性能
+
             logger.critical(
                 "test_auc: {:.5f}:  test_loss = {:.5f},  test_accuracy = {:.5f},  test_aux_loss = {:.5f}".format(
                     test_auc, test_loss, test_accuracy, test_aux_loss
                 )
-            )
-            test_auc_list.append(test_auc)
-            test_loss_list.append(test_loss)
-            test_acc_list.append(test_accuracy)
-            test_aux_loss_list.append(test_aux_loss)
-            write_summary(writer, tag="Test/auc", value=test_auc, step=step)
-            write_summary(writer, tag="Test/accuracy", value=test_accuracy, step=step)
-            write_summary(writer, tag="Test/loss", value=test_loss, step=step)
+            )  # 打印测试指标
 
-            if best_auc < test_auc:
-                best_auc = test_auc
-                saver.save(sess, dirname + "/best_model/")
+            test_auc_list.append(test_auc)  # 将AUC指标添加到列表中
+            test_loss_list.append(test_loss)  # 将测试损失添加到列表中
+            test_acc_list.append(test_accuracy)  # 将测试准确率添加到列表中
+            test_aux_loss_list.append(test_aux_loss)  # 将测试辅助损失添加到列表中
+
+            write_summary(writer, tag="Test/auc", value=test_auc, step=step)  # 将AUC指标写入TensorBoard的日志文件
+            write_summary(writer, tag="Test/accuracy", value=test_accuracy, step=step)  # 将测试准确率写入TensorBoard的日志文件
+            write_summary(writer, tag="Test/loss", value=test_loss, step=step)  # 将测试损失写入TensorBoard的日志文件
+
+            if best_auc < test_auc:  # 如果当前AUC指标超过之前记录的最佳AUC指标
+                best_auc = test_auc  # 更新最佳AUC指标的值
+                saver.save(sess, dirname + "/best_model/")  # 保存模型
                 logger.warning("[{}] Saved best model at step: {}, auc = {:.5f}".format(args.message, step, best_auc))
 
         # save model
-        if step % args.model_every == 0:
+        if step % args.model_every == 0:  # 如果步数能被args.model_every整除，则保存模型
             saver.save(sess, dirname + "/model/", global_step=step)
             logger.info("Saved model at step: {}".format(step))
 
     # learning rate decay after each epoch
     logger.debug("Epoch {:3d} finished. Learning rate reduced from {:.4E} to {:.4E}".format(epoch + 1, lr, lr * lr_decay))
-    lr *= lr_decay
+    lr *= lr_decay  # 学习率衰减
 
-logger.error("Experiment [{}] finished. Best auc = {:.5f}.".format(args.message, best_auc))
+logger.error("Experiment [{}] finished. Best auc = {:.5f}.".format(args.message, best_auc))  # 输出实验结束的日志记录
+
